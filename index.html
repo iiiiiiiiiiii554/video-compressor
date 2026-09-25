@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>動画圧縮</title>
+</head>
+
+<body>
+<h1>動画圧縮</h1>
+
+<input type="file" id="video" accept="video/*">
+
+<p id="status">動画を選択してください</p>
+
+<script>
+const video = document.getElementById("video");
+const status = document.getElementById("status");
+
+video.addEventListener("change", () => {
+    if (video.files.length > 0) {
+        status.textContent =
+            "選択しました: " + video.files[0].name;
+    }
+});
+</script>
+
+</body>
+</html>
