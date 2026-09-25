@@ -3,26 +3,339 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <title>動画圧縮</title>
+
+<style>
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        max-width: 600px;
+        margin: 0 auto;
+        padding: 30px 20px;
+        background: #f5f5f7;
+        color: #222;
+    }
+
+    h1 {
+        text-align: center;
+    }
+
+    .box {
+        background: white;
+        padding: 20px;
+        border-radius: 16px;
+        margin-top: 20px;
+    }
+
+    input, select, button {
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 12px;
+        padding: 14px;
+        font-size: 16px;
+        border-radius: 10px;
+    }
+
+    button {
+        border: none;
+        background: #007aff;
+        color: white;
+        font-weight: bold;
+    }
+
+    button:disabled {
+        opacity: 0.5;
+    }
+
+    #status {
+        margin-top: 20px;
+        white-space: pre-wrap;
+    }
+
+    video {
+        width: 100%;
+        margin-top: 15px;
+        border-radius: 10px;
+    }
+</style>
 </head>
 
 <body>
+
 <h1>動画圧縮</h1>
 
-<input type="file" id="video" accept="video/*">
+<div class="box">
 
-<p id="status">動画を選択してください</p>
+    <label>
+        動画を選択
+        <input
+            type="file"
+            id="fileInput"
+            accept="video/*"
+        >
+    </label>
+
+    <video id="preview" controls hidden></video>
+
+    <label>
+        圧縮レベル
+        <select id="quality">
+            <option value="0.8">高画質</option>
+            <option value="0.6" selected>標準</option>
+            <option value="0.4">軽量</option>
+        </select>
+    </label>
+
+    <button id="compressButton" disabled>
+        圧縮する
+    </button>
+
+    <div id="status">
+        動画を選択してください
+    </div>
+
+</div>
 
 <script>
-const video = document.getElementById("video");
+
+const fileInput = document.getElementById("fileInput");
+const preview = document.getElementById("preview");
+const quality = document.getElementById("quality");
+const compressButton = document.getElementById("compressButton");
 const status = document.getElementById("status");
 
-video.addEventListener("change", () => {
-    if (video.files.length > 0) {
-        status.textContent =
-            "選択しました: " + video.files[0].name;
+let selectedFile = null;
+
+fileInput.addEventListener("change", () => {
+
+    selectedFile = fileInput.files[0];
+
+    if (!selectedFile) {
+        compressButton.disabled = true;
+        return;
     }
+
+    const url = URL.createObjectURL(selectedFile);
+
+    preview.src = url;
+    preview.hidden = false;
+
+    compressButton.disabled = false;
+
+    const sizeMB =
+        (selectedFile.size / 1024 / 1024).toFixed(1);
+
+    status.textContent =
+        `選択しました\n${selectedFile.name}\n${sizeMB} MB`;
 });
+
+
+compressButton.addEventListener("click", async () => {
+
+    if (!selectedFile) return;
+
+    compressButton.disabled = true;
+
+    try {
+
+        status.textContent =
+            "動画を読み込んでいます…";
+
+        const video = document.createElement("video");
+
+        video.src = URL.createObjectURL(selectedFile);
+
+        video.muted = true;
+
+        await new Promise((resolve, reject) => {
+
+            video.onloadedmetadata = resolve;
+            video.onerror = reject;
+
+        });
+
+        const originalWidth = video.videoWidth;
+        const originalHeight = video.videoHeight;
+
+        /*
+         * 長辺を最大1280pxにする
+         * これによって高解像度動画を小さくする
+         */
+
+        const maxSize = 1280;
+
+        let width = originalWidth;
+        let height = originalHeight;
+
+        if (Math.max(width, height) > maxSize) {
+
+            if (width >= height) {
+
+                height =
+                    Math.round(height * maxSize / width);
+
+                width = maxSize;
+
+            } else {
+
+                width =
+                    Math.round(width * maxSize / height);
+
+                height = maxSize;
+            }
+        }
+
+        const canvas = document.createElement("canvas");
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+
+        status.textContent =
+            `圧縮中…\n${width} × ${height}`;
+
+        const stream =
+            canvas.captureStream(30);
+
+        let mimeType = "video/webm";
+
+        if (MediaRecorder.isTypeSupported("video/mp4")) {
+            mimeType = "video/mp4";
+        } else if (
+            MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+        ) {
+            mimeType = "video/webm;codecs=vp9";
+        } else if (
+            MediaRecorder.isTypeSupported("video/webm")
+        ) {
+            mimeType = "video/webm";
+        }
+
+        const recorder =
+            new MediaRecorder(stream, {
+                mimeType: mimeType,
+                videoBitsPerSecond:
+                    Math.round(
+                        2_000_000 *
+                        Number(quality.value)
+                    )
+            });
+
+        const chunks = [];
+
+        recorder.ondataavailable = event => {
+
+            if (event.data.size > 0) {
+                chunks.push(event.data);
+            }
+
+        };
+
+        const finished = new Promise(resolve => {
+
+            recorder.onstop = resolve;
+
+        });
+
+        recorder.start();
+
+        video.currentTime = 0;
+
+        await video.play();
+
+        await new Promise(resolve => {
+
+            function draw() {
+
+                if (video.ended) {
+
+                    resolve();
+                    return;
+                }
+
+                ctx.drawImage(
+                    video,
+                    0,
+                    0,
+                    width,
+                    height
+                );
+
+                requestAnimationFrame(draw);
+            }
+
+            draw();
+        });
+
+        recorder.stop();
+
+        await finished;
+
+        const blob =
+            new Blob(
+                chunks,
+                { type: mimeType }
+            );
+
+        const extension =
+            mimeType.includes("mp4")
+                ? "mp4"
+                : "webm";
+
+        const newName =
+            selectedFile.name
+                .replace(/\.[^/.]+$/, "")
+            + "_圧縮."
+            + extension;
+
+        const downloadURL =
+            URL.createObjectURL(blob);
+
+        const link =
+            document.createElement("a");
+
+        link.href = downloadURL;
+        link.download = newName;
+
+        document.body.appendChild(link);
+
+        link.click();
+
+        link.remove();
+
+        URL.revokeObjectURL(downloadURL);
+
+        const originalMB =
+            selectedFile.size /
+            1024 /
+            1024;
+
+        const compressedMB =
+            blob.size /
+            1024 /
+            1024;
+
+        status.textContent =
+            `圧縮完了！\n\n` +
+            `元のサイズ：${originalMB.toFixed(1)} MB\n` +
+            `圧縮後：${compressedMB.toFixed(1)} MB\n\n` +
+            `${newName}`;
+
+    } catch (error) {
+
+        console.error(error);
+
+        status.textContent =
+            "圧縮に失敗しました。\n" +
+            "この動画形式がSafariで対応していない可能性があります。";
+
+    }
+
+    compressButton.disabled = false;
+
+});
+
 </script>
 
 </body>
